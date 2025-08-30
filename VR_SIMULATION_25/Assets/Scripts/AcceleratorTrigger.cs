@@ -20,7 +20,7 @@ public class AcceleratorTrigger : MonoBehaviour
 
     void Update()
     {
-        bool rotating = activeAccelerator != null && Input.GetKey(KeyCode.R);
+        bool rotating = activeAccelerator != null && Input.GetKey(KeyCode.A);
 
         if (rotating)
         {

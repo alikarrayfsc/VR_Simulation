@@ -31,7 +31,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: -0.024796136, y: -0.06166, z: -0.00533}
-  m_LocalScale: {x: 110, y: 110, z: 110}
+  m_LocalScale: {x: 1100, y: 1100, z: 1100}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -152,6 +152,3 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Rb: {fileID: 3551497002503058860}
-  Source: {fileID: 0}
-  Clips: []
-  PoofPrefab: {fileID: 0}

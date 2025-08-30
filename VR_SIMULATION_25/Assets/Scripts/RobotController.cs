@@ -47,56 +47,39 @@ public class RobotController : MonoBehaviour
         UpdateWheelVisuals(rearRightWheel, rearRightVisual);
     }
 
-   private void HandleInput()
-{
-    float motor = 0f;
-    float brake = 0f;
-
-    bool forward = Input.GetKey(KeyCode.UpArrow);
-    bool backward = Input.GetKey(KeyCode.DownArrow);
-    bool left = Input.GetKey(KeyCode.LeftArrow);
-    bool right = Input.GetKey(KeyCode.RightArrow);
-    bool brakingKey = Input.GetKey(KeyCode.Space);
-
-    if (forward)
-        motor = motorForce;
-    else if (backward)
-        motor = -motorForce;
-
-    // If space is pressed, apply brake
-    if (brakingKey)
-        brake = brakeForce;
-
-    // If no movement keys are pressed, stop the robot
-    if (!forward && !backward && !left && !right && !brakingKey)
+    private void HandleInput()
     {
-        brake = brakeForce;
-        motor = 0f;
-    }
+        float motor = 0f;
+        float brake = 0f;
 
-    // Apply forces to wheels
-    ApplyWheel(frontLeftWheel, motor, brake);
-    ApplyWheel(frontRightWheel, motor, brake);
-    ApplyWheel(rearLeftWheel, motor, brake);
-    ApplyWheel(rearRightWheel, motor, brake);
+        if (Input.GetKey(KeyCode.UpArrow))
+            motor = motorForce;
+        else if (Input.GetKey(KeyCode.DownArrow))
+            motor = -motorForce;
 
-    // Turning logic
-    if (left)
-    {
-        rearLeftWheel.motorTorque = -motorForce;
-        
-        rearRightWheel.motorTorque = motorForce;
-        
-    }
-    else if (right)
-    {
-        rearLeftWheel.motorTorque = motorForce;
-        
-        rearRightWheel.motorTorque = -motorForce;
-        
-    }
-}
+        if (Input.GetKey(KeyCode.Space))
+            brake = brakeForce;
 
+        ApplyWheel(frontLeftWheel, motor, brake);
+        ApplyWheel(frontRightWheel, motor, brake);
+        ApplyWheel(rearLeftWheel, motor, brake);
+        ApplyWheel(rearRightWheel, motor, brake);
+
+        if (Input.GetKey(KeyCode.LeftArrow))
+        {
+            frontLeftWheel.motorTorque = -motorForce;
+            rearLeftWheel.motorTorque = -motorForce;
+            frontRightWheel.motorTorque = motorForce;
+            rearRightWheel.motorTorque = motorForce;
+        }
+        else if (Input.GetKey(KeyCode.RightArrow))
+        {
+            frontLeftWheel.motorTorque = motorForce;
+            rearLeftWheel.motorTorque = motorForce;
+            frontRightWheel.motorTorque = -motorForce;
+            rearRightWheel.motorTorque = -motorForce;
+        }
+    }
 
     private void ApplyWheel(WheelCollider wheel, float motor, float brake)
     {
