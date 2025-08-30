@@ -1,93 +1,94 @@
 ﻿using UnityEngine;
 
-[ExecuteAlways]
-public class RobotCenterOfMass : MonoBehaviour
+// This script ONLY calculates and displays the Center of Mass.
+// It does NOT automatically apply it to the Rigidbody.
+public class CoM_Calculator : MonoBehaviour
 {
+    [Header("Input")]
+    [Tooltip("Drag your main Rigidbody component here.")]
     public Rigidbody rb;
-    public float steelDensity = 7850f; // kg/m³
 
-    [Header("Collected Colliders (auto-filled)")]
-    public Collider[] colliders;
+    [Tooltip("The density of the material, used for mass calculation.")]
+    public float materialDensity = 7850f; // e.g., kg/m³ for steel
 
-    void Reset()
+    [Header("Output")]
+    [Tooltip("The calculated Center of Mass in the Rigidbody's local space. This is a read-only value.")]
+    public Vector3 calculatedCoM_Local;
+
+
+    // This creates a button in the Inspector. Click it to run the calculation.
+    [ContextMenu("Calculate Center of Mass")]
+    public void Calculate()
     {
-        rb = GetComponent<Rigidbody>();
-        CollectColliders();
-    }
+        if (!rb)
+        {
+            Debug.LogError("Rigidbody is not assigned! Please drag it into the 'rb' field in the Inspector.");
+            return;
+        }
 
-    void Start()
-    {
-        if (!rb) rb = GetComponent<Rigidbody>();
-        CollectColliders();
-        Recalculate();
-    }
-
-    [ContextMenu("Collect Colliders")]
-    void CollectColliders()
-    {
-        colliders = GetComponentsInChildren<Collider>();
-    }
-
-    [ContextMenu("Recalculate Center of Mass")]
-    public void Recalculate()
-    {
-        if (!rb || colliders == null || colliders.Length == 0) return;
+        Collider[] colliders = GetComponentsInChildren<Collider>();
+        if (colliders.Length == 0)
+        {
+            Debug.LogWarning("No colliders found on this object or its children.");
+            return;
+        }
 
         double totalMass = 0;
-        Vector3 weighted = Vector3.zero;
+        Vector3 weightedPositionSum = Vector3.zero;
 
         foreach (var c in colliders)
         {
-            if (!c || c.isTrigger) continue;
+            if (c.isTrigger) continue;
 
-            double vol = 0;
-            Vector3 center = c.bounds.center;
+            double volume = 0;
+            Vector3 worldCenter = c.bounds.center;
 
             if (c is BoxCollider box)
             {
-                Vector3 size = Vector3.Scale(box.size, Abs(box.transform.lossyScale));
-                vol = size.x * size.y * size.z;
-                center = box.transform.TransformPoint(box.center);
+                Vector3 size = Vector3.Scale(box.size, box.transform.lossyScale);
+                volume = size.x * size.y * size.z;
+                worldCenter = box.transform.TransformPoint(box.center);
             }
-            else if (c is WheelCollider wheel)
+            else if (c is SphereCollider sphere)
             {
-                float r = wheel.radius * Mathf.Max(wheel.transform.lossyScale.x, wheel.transform.lossyScale.z);
-                float w = wheel.suspensionDistance * Mathf.Abs(wheel.transform.lossyScale.y);
-                vol = Mathf.PI * r * r * w; // cylinder approx
-                center = wheel.transform.position;
+                float radius = sphere.radius * GetMaxAbsScale(sphere.transform.lossyScale);
+                volume = (4.0 / 3.0) * Mathf.PI * Mathf.Pow(radius, 3);
+                worldCenter = sphere.transform.TransformPoint(sphere.center);
             }
-            else if (c is MeshCollider mesh)
+            else if (c is CapsuleCollider capsule)
             {
-                Vector3 s = mesh.bounds.size;
-                vol = Mathf.Abs(s.x * s.y * s.z); // rough
-                center = mesh.bounds.center;
+                float radius = capsule.radius * GetMaxAbsScale(capsule.transform.lossyScale);
+                float height = capsule.height * Mathf.Abs(capsule.transform.lossyScale.y);
+                double cylinderVolume = Mathf.PI * radius * radius * (height - 2 * radius);
+                double sphereVolume = (4.0 / 3.0) * Mathf.PI * Mathf.Pow(radius, 3);
+                volume = cylinderVolume + sphereVolume;
+                worldCenter = capsule.transform.TransformPoint(capsule.center);
+            }
+            else if (c is MeshCollider)
+            {
+                // This is a rough approximation for MeshColliders
+                Vector3 size = c.bounds.size;
+                volume = size.x * size.y * size.z;
             }
 
-            double m = vol * steelDensity;
-            totalMass += m;
-            weighted += (float)m * center;
+            double mass = volume * materialDensity;
+            totalMass += mass;
+            weightedPositionSum += worldCenter * (float)mass;
         }
 
         if (totalMass <= 0) return;
 
-        Vector3 worldCoM = weighted / (float)totalMass;
-        rb.centerOfMass = rb.transform.InverseTransformPoint(worldCoM);
+        // Calculate the final CoM in world space
+        Vector3 worldCoM = weightedPositionSum / (float)totalMass;
 
-#if UNITY_EDITOR
-        UnityEditor.SceneView.RepaintAll();
-#endif
+        // Convert the world space CoM to the Rigidbody's local space
+        calculatedCoM_Local = rb.transform.InverseTransformPoint(worldCoM);
+
+        Debug.Log("Calculation complete. Calculated Local CoM is: " + calculatedCoM_Local);
     }
 
-    Vector3 Abs(Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
-
-    void OnDrawGizmosSelected()
+    private float GetMaxAbsScale(Vector3 scale)
     {
-        if (!rb) return;
-        Vector3 world = rb.transform.TransformPoint(rb.centerOfMass);
-        Gizmos.color = Color.red;
-        Gizmos.DrawSphere(world, 0.05f);
-        Debug.Log($"World CoM: {world}");
-        Debug.Log($"Local CoM: {rb.centerOfMass}");
+        return Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z));
     }
-       
 }
