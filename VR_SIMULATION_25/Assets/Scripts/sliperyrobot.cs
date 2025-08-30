@@ -1,299 +1,157 @@
-using System.Collections;
-using System.Collections.Generic;
-using UnityEngine.XR;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
-// Fusion des two scripts : SLIPERYROBOT and DriveRobot (Updated)
-public class SLIPERYROBOT : MonoBehaviour
+[RequireComponent(typeof(Rigidbody))]
+public class SlipperyRobotWithMiddleWheelZ : MonoBehaviour
 {
-    // --- Wheel Assignments (Assign ALL Primary WheelColliders) ---
-    [Header("Wheel Assignments (Assign ALL Primary WheelColliders)")]
-    public WheelCollider frontLeftWheel;
-    public WheelCollider frontRightWheel;
-    public WheelCollider backLeftWheel;
-    public WheelCollider backRightWheel;
+    [Header("Wheel Colliders (assign)")]
+    public WheelCollider frontLeftWheel;   // Z
+    public WheelCollider frontRightWheel;  // E
+    public WheelCollider backLeftWheel;    // S
+    public WheelCollider backRightWheel;   // D
 
-    float currentsidwaysdirection;
-    
+    [Header("Middle Wheel Visual (no collider)")]
+    public Transform centerVisual;
 
-    [Header("Visual Wheel Setup (Optional)")]
-    // Assign ALL WheelColliders that have a visual representation here, in order.
-    // Ensure these are the WheelColliders of your PRIMARY drive wheels.
-    public List<WheelCollider> allWheelCollidersForVisuals = new List<WheelCollider>();
-    // Assign ALL corresponding visual Transforms here, matching the order of allWheelCollidersForVisuals.
-    public List<Transform> allVisualWheels = new List<Transform>();
+    [Header("Wheel Visuals (optional)")]
+    public Transform frontLeftVisual;
+    public Transform frontRightVisual;
+    public Transform backLeftVisual;
+    public Transform backRightVisual;
 
-    [Header("Movement Powers")]
-    public float maxMotorForce = 2000f; // Power for standard forward/backward/turning movement
-    // --- DriveRobot additions (as per your provided script) ---
-    [Header("Robot Wheels - Assign Here")]
-    public WheelCollider[] leftWheels;
-    public WheelCollider[] rightWheels;
+    [Header("Physics & tuning")]
+    public Rigidbody rb;
+    public float maxMotorForce = 1500f;       // torque for main wheels
+    public float torqueSmoothing = 8f;
+    public float brakeForce = 8000f;
+    public float lateralStrength = 1200f;     // force for middle wheel
+    public float rotationTorque = 1200f;      // for turning
+    public float rotationSmoothing = 6f;
+    public float wheelVisualRotationSpeed = 800f;
 
-    // --- Lateral Strafing Wheel Visuals (Q/E) ---
-    // These are NOW ONLY for the VISUALS of the strafing wheels, they do NOT use WheelColliders.
-    [Header("Lateral Strafing Wheel Visuals")]
-    public Transform[] centerStrafingWheelVisuals;
+    // internal smoothed targets
+    float targetFL, targetFR, targetBL, targetBR;
+    float currentFL, currentFR, currentBL, currentBR;
+    float targetYawTorque, currentYawTorque;
 
-    [Header("Physics Body & Custom Lateral Slip")]
-    public Rigidbody robotMainRigidbody; // Assign the main Rigidbody of your robot for applying lateral force.
-    public float customLateralForceStrength = 2000f;
-    public Rigidbody rb; // Reference for the Center of Mass (CoM) visualization.
-
-    [Header("Visual Wheels - Assign Here (from DriveRobot part)")]
-    public Transform[] leftWheelVisuals;
-    public Transform[] rightWheelVisuals;
+    void Awake()
+    {
+        if (rb == null) rb = GetComponent<Rigidbody>();
+        ConfigureDefaultSidewaysFriction(frontLeftWheel);
+        ConfigureDefaultSidewaysFriction(frontRightWheel);
+        ConfigureDefaultSidewaysFriction(backLeftWheel);
+        ConfigureDefaultSidewaysFriction(backRightWheel);
+    }
 
     void FixedUpdate()
     {
-        currentsidwaysdirection = 0;
-        // --- Inputs for standard movement (arrow keys) ---
-        float verticalArrowInput = 0f;
-        if (Input.GetKey(KeyCode.UpArrow)) verticalArrowInput = -1f;
-        else if (Input.GetKey(KeyCode.DownArrow)) verticalArrowInput = 1f;
+        float delta = Time.fixedDeltaTime;
 
-        float horizontalArrowInput = 0f;
-        if (Input.GetKey(KeyCode.RightArrow)) horizontalArrowInput = 1f;
-        else if (Input.GetKey(KeyCode.LeftArrow)) horizontalArrowInput = -1f;
+        // --- Rotation (Arrow Keys) ---
+        float turnInput = 0f;
+        if (Input.GetKey(KeyCode.RightArrow)) turnInput = 1f;
+        else if (Input.GetKey(KeyCode.LeftArrow)) turnInput = -1f;
 
-        // --- Inputs for lateral strafing ---
-        bool strafeLeftInput = Input.GetKey(KeyCode.Q);
-        bool strafeRightInput = Input.GetKey(KeyCode.E);
-        bool isStrafing = strafeLeftInput || strafeRightInput;
-        if (isStrafing) {
-            if (strafeRightInput)
-            {
-                currentsidwaysdirection = -1;
-            }
-            else if (strafeLeftInput)
-            {
-                currentsidwaysdirection = 1;
-            }
-        }
+        targetYawTorque = turnInput * rotationTorque;
+        currentYawTorque = Mathf.Lerp(currentYawTorque, targetYawTorque, 1 - Mathf.Exp(-rotationSmoothing * delta));
+        if (Mathf.Abs(currentYawTorque) > 0.01f)
+            rb.AddTorque(Vector3.up * currentYawTorque, ForceMode.Force);
 
-        // --- List of active wheels for standard movement (6 wheels as per your provided script) ---
-        List<WheelCollider> activeWheels = new List<WheelCollider>
+        // --- Individual wheel keys ---
+        bool keyZ = Input.GetKey(KeyCode.S); // front left
+        bool keyE = Input.GetKey(KeyCode.D); // front right
+        bool keyS = Input.GetKey(KeyCode.W); // back left
+        bool keyD = Input.GetKey(KeyCode.E); // back right
+
+        // Middle wheel strafing keys
+        float strafeDir = 0f;
+        if (Input.GetKey(KeyCode.I)) strafeDir = 1f;    // strafe right
+        if (Input.GetKey(KeyCode.P)) strafeDir = -1f;   // strafe left
+
+        // Reset targets
+        targetFL = targetFR = targetBL = targetBR = 0f;
+
+        if (keyZ) targetFL = maxMotorForce;
+        if (keyE) targetFR = maxMotorForce;
+        if (keyS) targetBL = -maxMotorForce;
+        if (keyD) targetBR = -maxMotorForce;
+
+        // Brake if no input
+        bool anyInput = keyZ || keyE || keyS || keyD || strafeDir != 0f || turnInput != 0f;
+        float appliedBrake = anyInput ? 0f : brakeForce;
+
+        // Smooth torque
+        currentFL = Mathf.Lerp(currentFL, targetFL, 1 - Mathf.Exp(-torqueSmoothing * delta));
+        currentFR = Mathf.Lerp(currentFR, targetFR, 1 - Mathf.Exp(-torqueSmoothing * delta));
+        currentBL = Mathf.Lerp(currentBL, targetBL, 1 - Mathf.Exp(-torqueSmoothing * delta));
+        currentBR = Mathf.Lerp(currentBR, targetBR, 1 - Mathf.Exp(-torqueSmoothing * delta));
+
+        ApplyMotorAndBrakes(frontLeftWheel, currentFL, appliedBrake);
+        ApplyMotorAndBrakes(frontRightWheel, currentFR, appliedBrake);
+        ApplyMotorAndBrakes(backLeftWheel, currentBL, appliedBrake);
+        ApplyMotorAndBrakes(backRightWheel, currentBR, appliedBrake);
+
+        // --- Middle wheel lateral force ---
+        float lateralForce = strafeDir * lateralStrength;
+        if (Mathf.Abs(lateralForce) > 0.01f)
+            rb.AddForce(transform.right * lateralForce, ForceMode.Force);
+
+        // --- Update visuals ---
+        UpdateWheelVisual(frontLeftWheel, frontLeftVisual, currentFL);
+        UpdateWheelVisual(frontRightWheel, frontRightVisual, currentFR);
+        UpdateWheelVisual(backLeftWheel, backLeftVisual, currentBL);
+        UpdateWheelVisual(backRightWheel, backRightVisual, currentBR);
+
+        // Middle wheel visual rotation along Z axis
+        if (centerVisual != null)
         {
-            frontLeftWheel, frontRightWheel,
-            backLeftWheel, backRightWheel
-        };
-        activeWheels.RemoveAll(item => item == null); // Remove any unassigned wheel slots
-
-        // --- Reset all identified wheels (primary drive wheels) ---
-        // This ensures all torques, brakes, and steer angles are zeroed before applying new forces.
-        SetAllWheelsToZeroTorque();
-
-        // The ConfigureStrafingWheels method is REMOVED as there are no WheelColliders for these wheels anymore.
-        // The visual rotation for strafing wheels is now handled directly within UpdateAllWheelVisualsCombined.
-
-        // --- Standard movement (arrow keys) ---
-        // These blocks are retained as per your request "do not remove the other wheel's movement".
-        if (verticalArrowInput != 0f)
-        {
-            // Forward/backward movement (applies to the 6 'activeWheels')
-            foreach (WheelCollider wheel in activeWheels)
-            {
-                wheel.motorTorque = verticalArrowInput * maxMotorForce;
-            }
-        }
-        else if (horizontalArrowInput != 0f)
-        {
-            // Turning (applies to the 6 'activeWheels')
-            foreach (WheelCollider wheel in activeWheels)
-            {
-                if (wheel.transform.localPosition.x < 0) // Left side wheels
-                    wheel.motorTorque = horizontalArrowInput * maxMotorForce; // Using single maxMotorForce
-                else // Right side wheels
-                    wheel.motorTorque = -horizontalArrowInput * maxMotorForce; // Using single maxMotorForce
-            }
-        }
-        else
-        {
-            // If no arrow key input, ensure motor torque is zero for standard wheels
-            foreach (WheelCollider wheel in activeWheels)
-            {
-                wheel.motorTorque = 0f;
-            }
-        }
-
-        // --- Lateral Strafing (Q/E) ---
-        if (isStrafing)
-        {
-            if (robotMainRigidbody == null)
-            {
-                Debug.LogWarning("robotMainRigidbody is not assigned. Cannot apply lateral force for strafing. Please assign it in the Inspector.");
-                // Continue without applying force, but allow visual updates if robotMainRigidbody is null.
-            }
-            else
-            {
-                Vector3 lateralForce = robotMainRigidbody.transform.right * currentsidwaysdirection * customLateralForceStrength;
-                robotMainRigidbody.AddForce(lateralForce, ForceMode.Force);
-            }
-        }
-
-        // --- Visual update ---
-        // Merged and updated visual update method to manage all wheel visuals selectively.
-        UpdateAllWheelVisualsCombined(isStrafing, currentsidwaysdirection); // Pass strafing info for visual wheels
-    }
-
-    // --- Helper to reset all recognized wheel states for WheelColliders ---
-    // This method now collects all WheelColliders declared in the script and resets their state.
-    void SetAllWheelsToZeroTorque()
-    {
-        List<WheelCollider> allAvailableWheelColliders = new List<WheelCollider>();
-
-        // Add the explicitly named primary wheel colliders
-        if (frontLeftWheel != null) allAvailableWheelColliders.Add(frontLeftWheel);
-        if (frontRightWheel != null) allAvailableWheelColliders.Add(frontRightWheel); 
-        if (backLeftWheel != null) allAvailableWheelColliders.Add(backLeftWheel);
-        if (backRightWheel != null) allAvailableWheelColliders.Add(backRightWheel);
-
-        // Add any other WheelColliders assigned for visuals (allWheelCollidersForVisuals) if not already included
-        if (allWheelCollidersForVisuals != null)
-        {
-            foreach (WheelCollider wheelCol in allWheelCollidersForVisuals)
-            {
-                if (wheelCol != null && !allAvailableWheelColliders.Contains(wheelCol))
-                {
-                    allAvailableWheelColliders.Add(wheelCol);
-                }
-            }
-        }
-
-        // Add DriveRobot's specific wheel lists if they are distinct and need reset
-        if (leftWheels != null)
-        {
-            foreach (WheelCollider wheel in leftWheels)
-            {
-                if (wheel != null && !allAvailableWheelColliders.Contains(wheel))
-                {
-                    allAvailableWheelColliders.Add(wheel);
-                }
-            }
-        }
-        if (rightWheels != null)
-        {
-            foreach (WheelCollider wheel in rightWheels)
-            {
-                if (wheel != null && !allAvailableWheelColliders.Contains(wheel))
-                {
-                    allAvailableWheelColliders.Add(wheel);
-                }
-            }
-        }
-
-        // Apply reset to all collected WheelColliders
-        foreach (WheelCollider wheel in allAvailableWheelColliders)
-        {
-            if (wheel != null)
-            {
-                wheel.motorTorque = 0f;
-                wheel.brakeTorque = 0f;
-
-                // Also reset sideways friction on all wheels to a default to prevent residual slipperiness
-                // This ensures non-strafing wheels have grip.
-                WheelFrictionCurve normalSidewaysFriction = new WheelFrictionCurve();
-                normalSidewaysFriction.extremumSlip = 0.2f;
-                normalSidewaysFriction.extremumValue = 1f;
-                normalSidewaysFriction.asymptoteSlip = 0.5f;
-                normalSidewaysFriction.asymptoteValue = 0.75f;
-                normalSidewaysFriction.stiffness = 1f;
-                wheel.sidewaysFriction = normalSidewaysFriction;
-
-                wheel.steerAngle = 0f; // Reset steer angle too
-            }
+            float rotationAmount = strafeDir * lateralStrength * delta;
+            centerVisual.Rotate(Vector3.forward, rotationAmount, Space.Self);
         }
     }
 
-    // This method (ConfigureStrafingWheels) is REMOVED as there are no WheelColliders for the strafing wheels.
-
-    // Helper for updating single wheel visuals, used within the combined function
-    void UpdateSingleWheelVisual(WheelCollider collider, Transform visualWheel)
+    void ApplyMotorAndBrakes(WheelCollider col, float torqueVal, float brake)
     {
-        if (collider == null || visualWheel == null) return;
-        Vector3 position;
-        Quaternion rotation;
-        collider.GetWorldPose(out position, out rotation);
-        visualWheel.position = position;
-        visualWheel.rotation = rotation;
+        if (col == null) return;
+        col.motorTorque = torqueVal;
+        col.brakeTorque = brake;
+        col.steerAngle = 0f;
     }
 
-    // NEW: Combined visual update method to manage all wheel visuals selectively
-    // Now takes strafing direction to apply direct visual rotation to strafing visuals.
-    void UpdateAllWheelVisualsCombined(bool isStrafing, float strafeDirection)
+    void UpdateWheelVisual(WheelCollider col, Transform visual, float torqueEstimate)
     {
-        // Target visual rotation for strafing wheels (e.g., 90 degrees for sideway movement)
-        // Adjust the sign depending on your wheel's local axis and desired turn direction.
-        float targetVisualAngleX = strafeDirection ;
-    
-
-        // Update visuals for 'SLIPERYROBOT's primary wheels (allWheelCollidersForVisuals)
-        // These wheels are still using WheelColliders and their visuals follow GetWorldPose.
-        if (allWheelCollidersForVisuals.Count == allVisualWheels.Count)
+        if (visual == null) return;
+        if (col != null)
         {
-            for (int i = 0; i < allWheelCollidersForVisuals.Count; i++)
-            {
-                WheelCollider wheelCol = allWheelCollidersForVisuals[i];
-                Transform visualWheel = allVisualWheels[i];
+            Vector3 pos;
+            Quaternion rot;
+            col.GetWorldPose(out pos, out rot);
+            visual.position = pos;
+            visual.rotation = rot;
 
-                if (wheelCol == null || visualWheel == null) continue;
-
-                Vector3 pos;
-                Quaternion rot;
-                wheelCol.GetWorldPose(out pos, out rot);
-
-                visualWheel.position = pos;
-                visualWheel.rotation = rot; // Normal update for primary wheels
-            }
+            float spin = torqueEstimate * Time.fixedDeltaTime;
+            visual.Rotate(Vector3.right, spin * wheelVisualRotationSpeed, Space.Self);
         }
+    }
 
-        // Update visuals for 'DriveRobot' specific wheels (leftWheels, rightWheels)
-        // These are also assumed to be WheelColliders and their visuals follow GetWorldPose.
-        for (int i = 0; i < leftWheels.Length; i++)
-        {
-            if (leftWheels[i] != null && i < leftWheelVisuals.Length && leftWheelVisuals[i] != null)
-            {
-                UpdateSingleWheelVisual(leftWheels[i], leftWheelVisuals[i]);
-            }
-        }
-        for (int i = 0; i < rightWheels.Length; i++)
-        {
-            if (rightWheels[i] != null && i < rightWheelVisuals.Length && rightWheelVisuals[i] != null)
-            {
-                UpdateSingleWheelVisual(rightWheels[i], rightWheelVisuals[i]);
-            }
-        }
-
-        // NEW: Manually update the rotation of the CENTER STRAFING VISUALS (no WheelCollider used here)
-        if (centerStrafingWheelVisuals != null)
-        {
-            for (int i = 0; i < centerStrafingWheelVisuals.Length; i++)
-            {
-                Transform visualWheel = centerStrafingWheelVisuals[i];
-                if (visualWheel == null) continue;
-
-                if (isStrafing)
-                {
-                    // Directly set the local rotation for strafing
-                    visualWheel.localRotation = Quaternion.Euler(visualWheel.localEulerAngles.x, visualWheel.localEulerAngles.y, visualWheel.localEulerAngles.z);
-                }
-                else
-                {
-                    // Reverts to forward-facing when not strafing
-                    visualWheel.localRotation = Quaternion.Euler(visualWheel.localEulerAngles.x, visualWheel.localEulerAngles.y, visualWheel.localEulerAngles.z);
-                }
-                // Position is not managed here; it's assumed to be handled by parent Rigidbody's movement.
-            }
-        }
+    void ConfigureDefaultSidewaysFriction(WheelCollider col)
+    {
+        if (col == null) return;
+        WheelFrictionCurve side = col.sidewaysFriction;
+        side.extremumSlip = 0.2f;
+        side.extremumValue = 1f;
+        side.asymptoteSlip = 0.5f;
+        side.asymptoteValue = 0.75f;
+        side.stiffness = 1f;
+        col.sidewaysFriction = side;
     }
 
     void OnDrawGizmos()
     {
         if (rb != null)
         {
-            Vector3 worldCOM = rb.worldCenterOfMass;
             Gizmos.color = Color.red;
-            Gizmos.DrawSphere(worldCOM, 0.05f);
+            Gizmos.DrawSphere(rb.worldCenterOfMass, 0.06f);
         }
     }
 }
