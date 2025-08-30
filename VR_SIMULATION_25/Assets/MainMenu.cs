@@ -10,7 +10,7 @@ public class MainMenu : MonoBehaviour
 
     public void Play()
     {
-        SceneManager.LoadScene("youssef");
+        SceneManager.LoadScene("mvt");
     }
 
     public void Settings()
