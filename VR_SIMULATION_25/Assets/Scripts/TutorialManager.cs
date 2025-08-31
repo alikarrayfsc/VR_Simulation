@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
 using System;
@@ -18,6 +18,9 @@ public class TutorialManager : MonoBehaviour
 
     // Event to notify game has started
     public static event Action OnGameStarted;
+
+    [Header("Extra Object To Activate")]
+    public GameObject X;   // <- assign your object in Inspector
 
     void Start()
     {
@@ -55,5 +58,8 @@ public class TutorialManager : MonoBehaviour
         tutorialPanel.SetActive(false);
         GameManager.Instance.StartGame();      // Calls the GameManager's method
         OnGameStarted?.Invoke();               // Notify listeners like RobotController
+
+        if (X != null)
+            X.SetActive(true);   // 👈 This will make your object appear
     }
 }
