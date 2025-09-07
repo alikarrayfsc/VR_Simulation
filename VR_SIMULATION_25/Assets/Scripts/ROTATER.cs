@@ -1,18 +1,17 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
+using UnityEngine.XR; // <-- Important for CommonUsages
 
 public class ROTATER : MonoBehaviour
 {
     RigidbodyConstraints rc = RigidbodyConstraints.FreezeRotationX;
     public float torqueAmount = 10f;
     private Rigidbody rb;
+
     public float speedThreshold = 0.05f;
     public float checkTime = 1f;
     private float timer = 0f;
-    public bool isTryingToClimb = false;
 
-    [SerializeField] private InputActionProperty rotateAction;
-    // Bind this to "A" button on Right Controller in Inspector
+    public bool isTryingToClimb = false;
 
     void Start()
     {
@@ -21,9 +20,18 @@ public class ROTATER : MonoBehaviour
 
     void rotater()
     {
-        bool isPressed = rotateAction.action.IsPressed(); // true while holding A
+        bool buttonPressed = false;
 
-        if (isPressed)
+        // Get right-hand controller
+        InputDevice rightHand = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+
+        // Check if the "primaryButton" (A on Oculus) is pressed
+        if (rightHand.isValid)
+        {
+            rightHand.TryGetFeatureValue(CommonUsages.primaryButton, out buttonPressed);
+        }
+
+        if (buttonPressed)
         {
             rb.AddTorque(Vector3.right * torqueAmount);
             rb.constraints = RigidbodyConstraints.None;

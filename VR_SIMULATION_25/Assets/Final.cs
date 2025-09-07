@@ -64,9 +64,9 @@ public class SLIPERYROBOT_VR : MonoBehaviour
             foreach (var wheel in wheels)
             {
                 if (wheel.transform.localPosition.x < 0) // left wheels
-                    wheel.motorTorque = leftY * maxMotorForce * ((Mathf.Abs(leftY) > 0f && Mathf.Abs(rightY) > 0f) ? 1f : rotationLimit);
+                    wheel.motorTorque = rightY * maxMotorForce * ((Mathf.Abs(leftY) > 0f && Mathf.Abs(leftY) > 0f) ? 1f : rotationLimit);
                 else // right wheels
-                    wheel.motorTorque = rightY * maxMotorForce * ((Mathf.Abs(leftY) > 0f && Mathf.Abs(rightY) > 0f) ? 1f : rotationLimit);
+                    wheel.motorTorque = leftY * maxMotorForce * ((Mathf.Abs(leftY) > 0f && Mathf.Abs(rightY) > 0f) ? 1f : rotationLimit);
 
                 wheel.brakeTorque = 0f;
             }
@@ -77,8 +77,8 @@ public class SLIPERYROBOT_VR : MonoBehaviour
         rightHand.TryGetFeatureValue(CommonUsages.secondaryButton, out bool rightB);
 
         float strafeDir = 0f;
-        if (leftB) strafeDir -= 1f;   // Left B = strafe left
-        if (rightB) strafeDir += 1f;  // Right B = strafe right
+        if (rightB) strafeDir -= 1f;   // Left B = strafe left
+        if (leftB) strafeDir += 1f;  // Right B = strafe right
 
         if (strafeDir != 0f)
         {

@@ -4,9 +4,10 @@ using UnityEngine.XR;
 public class VRCameraCycle : MonoBehaviour
 {
     [Header("Assign Cameras")]
-    public GameObject xrCamera;     // XR Main Camera (inside XR Origin)
-    public GameObject robotCamera;  // Robot Camera
-    public GameObject topCamera;    // Top-down Camera
+    public GameObject xrCamera;      // XR Main Camera (inside XR Origin)
+    public GameObject robotCamera;   // Robot Camera
+    public GameObject topCamera;     // Top-down Camera
+    public GameObject sideCamera;    // Side Camera
 
     private GameObject[] cameras;
     private int currentIndex = 0;
@@ -15,7 +16,8 @@ public class VRCameraCycle : MonoBehaviour
 
     void Start()
     {
-        cameras = new GameObject[] { xrCamera, robotCamera, topCamera };
+        // Include the new side camera
+        cameras = new GameObject[] { xrCamera, robotCamera, topCamera, sideCamera };
         SetActiveCamera(0); // Start with XR
     }
 
@@ -50,4 +52,3 @@ public class VRCameraCycle : MonoBehaviour
         }
     }
 }
-
