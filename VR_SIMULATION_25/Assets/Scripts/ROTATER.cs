@@ -1,6 +1,5 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class ROTATER : MonoBehaviour
 {
@@ -11,27 +10,32 @@ public class ROTATER : MonoBehaviour
     public float checkTime = 1f;
     private float timer = 0f;
     public bool isTryingToClimb = false;
-    public float appliedForce = 0f;
+
+    [SerializeField] private InputActionProperty rotateAction;
+    // Bind this to "A" button on Right Controller in Inspector
+
     void Start()
     {
         rb = GetComponent<Rigidbody>();
     }
+
     void rotater()
     {
-        float input = Input.GetAxis("Fire1");
-        rb.AddTorque(Vector3.right * input * torqueAmount);
-        if(input !=0)
+        bool isPressed = rotateAction.action.IsPressed(); // true while holding A
+
+        if (isPressed)
         {
-           rb.constraints = RigidbodyConstraints.None;
+            rb.AddTorque(Vector3.right * torqueAmount);
+            rb.constraints = RigidbodyConstraints.None;
             isTryingToClimb = true;
         }
-        else{
-            
-          
+        else
+        {
             rb.constraints = rc;
             isTryingToClimb = false;
         }
     }
+
     void strugglecheck()
     {
         if (isTryingToClimb)
@@ -41,15 +45,18 @@ public class ROTATER : MonoBehaviour
             else
                 timer = 0f;
 
-            if (timer > checkTime){
+            if (timer > checkTime)
+            {
                 Debug.Log("Robot is struggling!");
-                torqueAmount = torqueAmount + 0.05f;}
+                torqueAmount += 0.05f;
+            }
         }
         else
         {
             timer = 0f;
         }
     }
+
     void FixedUpdate()
     {
         rotater();
