@@ -1,73 +1,44 @@
 using UnityEngine;
-using UnityEngine.XR; // <-- Important for CommonUsages
+using UnityEngine.XR;
 
-public class ROTATER : MonoBehaviour
+public class HangingRotater : MonoBehaviour
 {
-    RigidbodyConstraints rc = RigidbodyConstraints.FreezeRotationX;
-    public float torqueAmount = 10f;
-    private Rigidbody rb;
+    [Header("Rotation Settings")]
+    public Vector3 rotationAxis = Vector3.right; // X-axis rotation
+    public float rotationSpeed = 50f;
 
-    public float speedThreshold = 0.05f;
-    public float checkTime = 1f;
-    private float timer = 0f;
+    [Header("XR Settings")]
+    public XRNode positiveController = XRNode.RightHand; // Right-hand controller
+    public XRNode negativeController = XRNode.LeftHand;  // Left-hand controller
 
-    public bool isTryingToClimb = false;
+    public InputFeatureUsage<bool> positiveButton = CommonUsages.primaryButton;   // A button
+    public InputFeatureUsage<bool> negativeButton = CommonUsages.primaryButton;   // X button
 
-    void Start()
+    void Update()
     {
-        rb = GetComponent<Rigidbody>();
-    }
+        // Get devices
+        InputDevice rightDevice = InputDevices.GetDeviceAtXRNode(positiveController);
+        InputDevice leftDevice = InputDevices.GetDeviceAtXRNode(negativeController);
 
-    void rotater()
-    {
-        bool buttonPressed = false;
+        bool positivePressed = false;
+        bool negativePressed = false;
 
-        // Get right-hand controller
-        InputDevice rightHand = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+        if (rightDevice.isValid)
+            rightDevice.TryGetFeatureValue(positiveButton, out positivePressed);
 
-        // Check if the "primaryButton" (A on Oculus) is pressed
-        if (rightHand.isValid)
+        if (leftDevice.isValid)
+            leftDevice.TryGetFeatureValue(negativeButton, out negativePressed);
+
+        // Rotate in positive direction
+        if (positivePressed)
         {
-            rightHand.TryGetFeatureValue(CommonUsages.primaryButton, out buttonPressed);
+            transform.Rotate(rotationAxis.normalized * rotationSpeed * Time.deltaTime, Space.Self);
         }
 
-        if (buttonPressed)
+        // Rotate in negative direction
+        if (negativePressed)
         {
-            rb.AddTorque(Vector3.right * torqueAmount);
-            rb.constraints = RigidbodyConstraints.None;
-            isTryingToClimb = true;
+            transform.Rotate(-rotationAxis.normalized * rotationSpeed * Time.deltaTime, Space.Self);
         }
-        else
-        {
-            rb.constraints = rc;
-            isTryingToClimb = false;
-        }
-    }
-
-    void strugglecheck()
-    {
-        if (isTryingToClimb)
-        {
-            if (Mathf.Abs(rb.velocity.y) < speedThreshold)
-                timer += Time.deltaTime;
-            else
-                timer = 0f;
-
-            if (timer > checkTime)
-            {
-                Debug.Log("Robot is struggling!");
-                torqueAmount += 0.05f;
-            }
-        }
-        else
-        {
-            timer = 0f;
-        }
-    }
-
-    void FixedUpdate()
-    {
-        rotater();
-        strugglecheck();
     }
 }
