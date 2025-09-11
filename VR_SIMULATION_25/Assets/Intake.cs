@@ -1,5 +1,14 @@
+using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>
+/// Multi-ball CollectorManager:
+/// - Rotates visual rollers
+/// - Detects BiodiversityUnit objects via a detectionTrigger (child collider)
+/// - Converts detected balls to "carried" state (colliders -> triggers, rb -> kinematic)
+/// - Moves each carried ball along a Catmull-Rom spline using Rigidbody.MovePosition/MoveRotation in FixedUpdate
+/// - Restores physics when each ball finishes the path
+/// </summary>
 public class CollectorManager : MonoBehaviour
 {
     [Header("Path Settings")]
@@ -10,43 +19,111 @@ public class CollectorManager : MonoBehaviour
     [SerializeField] private bool PathFaceForward = true;
 
     [Header("Collector Settings")]
-    [Tooltip("All roller parts of the intake that should rotate.")]
+    [Tooltip("All roller parts of the intake that should rotate (visual only).")]
     [SerializeField] private GameObject[] collectorParts;
     [SerializeField] private Vector3 collectorRotationAxis = Vector3.up;
     [SerializeField] private float collectorRotationSpeed = 50f;
 
     [Tooltip("If true, collector rotates automatically. If false, it needs button control.")]
     [SerializeField] private bool automaticMode = true;
-
     [Tooltip("Key used to toggle spinning in Control Mode.")]
     [SerializeField] private KeyCode toggleKey = KeyCode.C;
 
-    // Internal state
-    private bool isCollectorSpinning = false; // used in Control Mode
+    [Header("Detection Settings")]
+    [Tooltip("Trigger collider used to detect Biodiversity Units. Place it as a child of Intake.")]
+    [SerializeField] private Collider detectionTrigger;
 
-    // Path state
-    private float pathTime;
-    private bool isFollowingPath = false;
-    private BiodiversityUnitManager movingBall;
+    [Header("Debugging")]
+    [Tooltip("Enable to see debug logs about detection and carrying.")]
+    [SerializeField] private bool debugLogs = true;
+
+    // rotation state
+    private bool isCollectorSpinning = false;
+
+    // data for each carried ball
+    private class Carried
+    {
+        public BiodiversityUnitManager manager;
+        public Rigidbody rb;
+        public Collider[] colliders;
+        public bool[] originalIsTrigger;
+        public float pathTime;
+    }
+    private readonly List<Carried> carriedBalls = new List<Carried>();
 
     private void Start()
     {
-        // Safety check for path
+        // basic validation
         if (controlPoints == null || controlPoints.Length < 2)
-        {
             Debug.LogError("CollectorManager: Please assign at least 2 control points!");
+
+        if (detectionTrigger == null)
+            Debug.LogError("CollectorManager: Please assign a trigger collider in Detection Settings!");
+        else
+        {
+            if (!detectionTrigger.isTrigger)
+            {
+                Debug.LogWarning("CollectorManager: detectionTrigger is not set as trigger — forcing it to trigger.");
+                detectionTrigger.isTrigger = true;
+            }
+
+            // Add or wire the TriggerForwarder so trigger events call this manager
+            var forwarder = detectionTrigger.GetComponent<TriggerForwarder>();
+            if (forwarder == null)
+            {
+                forwarder = detectionTrigger.gameObject.AddComponent<TriggerForwarder>();
+            }
+            forwarder.manager = this;
         }
 
-        // If automatic, it starts spinning right away
         if (automaticMode) isCollectorSpinning = true;
     }
 
     private void Update()
     {
         HandleCollectorRotation();
-        HandlePathFollowing();
+        // NOTE: movement of carried balls happens in FixedUpdate
     }
 
+    private void FixedUpdate()
+    {
+        // Update all carried balls along the spline using physics-friendly move
+        for (int i = carriedBalls.Count - 1; i >= 0; i--)
+        {
+            var c = carriedBalls[i];
+
+            // safeguard
+            if (c == null || c.manager == null || c.rb == null)
+            {
+                carriedBalls.RemoveAt(i);
+                continue;
+            }
+
+            c.pathTime += Time.fixedDeltaTime / Mathf.Max(0.0001f, PathDuration);
+            float t = Mathf.Clamp01(c.pathTime);
+
+            Vector3 pos = GetCatmullRomClamped(t);
+            // use MovePosition/MoveRotation so physics remains stable
+            c.rb.MovePosition(pos);
+
+            if (PathFaceForward)
+            {
+                float lookAhead = 0.001f;
+                float t2 = Mathf.Min(t + lookAhead, 1f);
+                Vector3 pos2 = GetCatmullRomClamped(t2);
+                Vector3 dir = (pos2 - pos).normalized;
+                if (dir != Vector3.zero) c.rb.MoveRotation(Quaternion.LookRotation(dir));
+            }
+
+            if (t >= 1f)
+            {
+                FinishCarry(c);
+                carriedBalls.RemoveAt(i);
+            }
+        }
+    }
+
+    #region Rotation
     private void HandleCollectorRotation()
     {
         if (collectorParts == null || collectorParts.Length == 0) return;
@@ -54,98 +131,131 @@ public class CollectorManager : MonoBehaviour
         if (automaticMode)
         {
             foreach (var part in collectorParts)
-            {
-                if (part != null)
-                {
-                    part.transform.Rotate(collectorRotationAxis * collectorRotationSpeed * Time.deltaTime, Space.Self);
-                }
-            }
+                if (part != null) part.transform.Rotate(collectorRotationAxis * collectorRotationSpeed * Time.deltaTime, Space.Self);
             isCollectorSpinning = true;
         }
         else
         {
-            if (Input.GetKeyDown(toggleKey))
-            {
-                isCollectorSpinning = !isCollectorSpinning;
-            }
-
+            if (Input.GetKeyDown(toggleKey)) isCollectorSpinning = !isCollectorSpinning;
             if (isCollectorSpinning)
-            {
                 foreach (var part in collectorParts)
-                {
-                    if (part != null)
-                    {
-                        part.transform.Rotate(collectorRotationAxis * collectorRotationSpeed * Time.deltaTime, Space.Self);
-                    }
-                }
-            }
+                    if (part != null) part.transform.Rotate(collectorRotationAxis * collectorRotationSpeed * Time.deltaTime, Space.Self);
         }
     }
+    #endregion
 
+    #region Detection API
+    // Called by TriggerForwarder or fallback OnTriggerEnter
+    public void HandleDetectionEnter(Collider other)
+    {
+        if (debugLogs) Debug.Log($"CollectorManager: Trigger entered by '{other.name}'");
+
+        if (!isCollectorSpinning)
+        {
+            if (debugLogs) Debug.Log("CollectorManager: Not spinning — ignoring detection.");
+            return;
+        }
+
+        if (!other.CompareTag("BiodiversityUnit"))
+        {
+            if (debugLogs) Debug.Log("CollectorManager: Collider is not BiodiversityUnit — ignoring.");
+            return;
+        }
+
+        // find manager on the collider or parent (supports compound colliders)
+        var unitManager = other.GetComponent<BiodiversityUnitManager>() ?? other.GetComponentInParent<BiodiversityUnitManager>();
+        if (unitManager == null)
+        {
+            if (debugLogs) Debug.LogWarning("CollectorManager: BiodiversityUnit detected but no BiodiversityUnitManager attached — ignoring.");
+            return;
+        }
+
+        StartCarry(unitManager);
+    }
+
+    // fallback if detectionTrigger is on same GameObject (still calls the same handler)
     private void OnTriggerEnter(Collider other)
     {
-        // ? Do nothing if collector is not spinning
-        if (!isCollectorSpinning) return;
-
-        if (other.CompareTag("BiodiversityUnit"))
-        {
-            BiodiversityUnitManager ballManager = other.GetComponent<BiodiversityUnitManager>();
-            if (ballManager == null) return;
-
-            StartBallPath(ballManager);
-        }
+        // if detectionTrigger is assigned and the trigger uses a forwarder, forwarder calls HandleDetectionEnter.
+        // But keep fallback to handle direct triggers.
+        HandleDetectionEnter(other);
     }
+    #endregion
 
-    private void StartBallPath(BiodiversityUnitManager ball)
+    #region Carry logic
+    private void StartCarry(BiodiversityUnitManager unit)
     {
+        if (unit == null) return;
         if (controlPoints == null || controlPoints.Length < 2) return;
 
-        Rigidbody rb = ball.GetComponent<Rigidbody>();
+        Rigidbody rb = unit.GetComponent<Rigidbody>();
+        if (rb == null)
+        {
+            if (debugLogs) Debug.LogWarning("CollectorManager: BiodiversityUnit has no Rigidbody — cannot carry.");
+            return;
+        }
+
+        // collect all colliders on the unit (including children)
+        Collider[] cols = unit.GetComponentsInChildren<Collider>();
+        if (cols == null || cols.Length == 0)
+        {
+            if (debugLogs) Debug.LogWarning("CollectorManager: BiodiversityUnit has no colliders.");
+        }
+
+        // store original isTrigger values and set them to true so the ball doesn't push the robot
+        bool[] original = new bool[cols.Length];
+        for (int i = 0; i < cols.Length; i++)
+        {
+            original[i] = cols[i].isTrigger;
+            cols[i].isTrigger = true;
+        }
+
+        // stop existing motion and set to kinematic so we control it with MovePosition
         rb.velocity = Vector3.zero;
         rb.angularVelocity = Vector3.zero;
-        rb.isKinematic = true; // follow path first
+        rb.isKinematic = true;
 
-        movingBall = ball;
-        pathTime = 0f;
-        isFollowingPath = true;
+        // create carried entry
+        Carried c = new Carried
+        {
+            manager = unit,
+            rb = rb,
+            colliders = cols,
+            originalIsTrigger = original,
+            pathTime = 0f
+        };
+
+        carriedBalls.Add(c);
+
+        if (debugLogs) Debug.Log($"CollectorManager: Started carrying '{unit.name}'. Active carried count = {carriedBalls.Count}");
     }
 
-    private void HandlePathFollowing()
+    private void FinishCarry(Carried c)
     {
-        if (!isFollowingPath || movingBall == null) return;
+        if (c == null) return;
 
-        pathTime += Time.deltaTime / Mathf.Max(0.0001f, PathDuration);
-        float t = Mathf.Clamp01(pathTime);
-
-        Vector3 pos = GetCatmullRomClamped(t);
-        movingBall.transform.position = pos;
-
-        if (PathFaceForward)
+        // restore physics
+        if (c.rb != null)
         {
-            float lookAhead = 0.001f;
-            float t2 = Mathf.Min(t + lookAhead, 1f);
-            Vector3 pos2 = GetCatmullRomClamped(t2);
-            Vector3 dir = (pos2 - pos).normalized;
-            if (dir != Vector3.zero) movingBall.transform.rotation = Quaternion.LookRotation(dir);
+            c.rb.isKinematic = false;
+            c.rb.velocity = Vector3.zero; // optional: give small downward velocity if needed
         }
 
-        if (t >= 1f)
+        // restore collider states
+        if (c.colliders != null && c.originalIsTrigger != null)
         {
-            FinishPath();
+            for (int i = 0; i < c.colliders.Length; i++)
+            {
+                if (c.colliders[i] != null)
+                    c.colliders[i].isTrigger = c.originalIsTrigger[i];
+            }
         }
+
+        if (debugLogs) Debug.Log($"CollectorManager: Finished carrying '{c.manager?.name}'. Active carried count = {carriedBalls.Count - 1}");
     }
+    #endregion
 
-    private void FinishPath()
-    {
-        isFollowingPath = false;
-
-        // Now the ball should act naturally with physics
-        Rigidbody rb = movingBall.GetComponent<Rigidbody>();
-        rb.isKinematic = false; // gravity + physics on
-
-        movingBall = null;
-    }
-
+    #region Catmull-Rom spline
     // Catmull–Rom spline with clamped ends
     private Vector3 GetCatmullRomClamped(float tNorm)
     {
@@ -172,5 +282,18 @@ public class CollectorManager : MonoBehaviour
             (2f * p0 - 5f * p1 + 4f * p2 - p3) * (u * u) +
             (-p0 + 3f * p1 - 3f * p2 + p3) * (u * u * u)
         );
+    }
+    #endregion
+}
+
+/// <summary>
+/// Small helper attached to the detectionTrigger object. Forwards the trigger event to the manager.
+/// </summary>
+public class TriggerForwarder : MonoBehaviour
+{
+    [HideInInspector] public CollectorManager manager;
+    private void OnTriggerEnter(Collider other)
+    {
+        manager?.HandleDetectionEnter(other);
     }
 }
